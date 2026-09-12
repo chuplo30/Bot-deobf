@@ -14,6 +14,7 @@ RUBIS_EMOJI = "<:rubis:1546171167281254550>"
 INLINE_LIMIT = 2000
 
 DETECT_URL = "https://leakd.up.railway.app/detect"
+OBF_URL = "https://8xms-obfuscator.netlify.app/api/obfuscate"
 
 HEADER = """--[[ 
 █░░░█ █▀█ █▄░█
@@ -84,6 +85,14 @@ def call_detect_api(content: bytes) -> dict:
         return r.json()
     except ValueError:
         return {"success": False}
+
+
+def call_obf_api(code: str) -> dict:
+    try:
+        r = requests.post(OBF_URL, json={"code": code}, timeout=180)
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def upload_to_rubis(content: str, title: str = "WAN DEOBFUSCATOR") -> Optional[str]:
@@ -389,6 +398,96 @@ async def detect(ctx, url: str = None):
             f"Detected: {detected_name} ({confidence}% confidence) {supported}"
         )
     )
+
+
+@bot.command(name="obf")
+async def obf(ctx, *, input_text: str = None):
+    loading = None
+    code = None
+    filename = "script.lua"
+
+    attachment = await get_attachment(ctx)
+
+    if attachment:
+        loading = await ctx.send(f"{LOADER} Reading attached file...")
+        try:
+            content = await attachment.read()
+            code = content.decode("utf-8", errors="ignore")
+            filename = attachment.filename
+            if not filename.lower().endswith(".lua"):
+                filename += ".lua"
+        except Exception as e:
+            return await loading.edit(content=f"Failed to read file: {e}")
+
+    elif input_text and input_text.strip().startswith(("http://", "https://")):
+        url = input_text.strip()
+        loading = await ctx.send(f"{LOADER} Downloading file from URL...")
+        try:
+            loop = asyncio.get_event_loop()
+
+            def download():
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                }
+                r = requests.get(url, timeout=60, headers=headers, allow_redirects=True)
+                r.raise_for_status()
+                return r.content
+
+            content = await loop.run_in_executor(None, download)
+            code = content.decode("utf-8", errors="ignore")
+            filename = url.split("/")[-1].split("?")[0] or "script.lua"
+            if not filename.lower().endswith(".lua"):
+                filename += ".lua"
+        except requests.exceptions.RequestException as e:
+            return await loading.edit(content=f"Failed to download file: {e}")
+
+    elif input_text and input_text.strip():
+        code = input_text
+        loading = await ctx.send(f"{LOADER} Obfuscating...")
+
+    else:
+        return await ctx.send(
+            "Usage:\n"
+            "• .obf <url> — download from link then obfuscate\n"
+            "• .obf <code> — obfuscate inline code\n"
+            "• .obf + attached file / reply file"
+        )
+
+    if not code or not code.strip():
+        return await loading.edit(content="No code provided.")
+
+    if loading is None:
+        loading = await ctx.send(f"{LOADER} Obfuscating...")
+    else:
+        try:
+            await loading.edit(content=f"{LOADER} Obfuscating...")
+        except Exception:
+            pass
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, call_obf_api, code)
+    except Exception as e:
+        return await loading.edit(content=f"Obfuscation error: {e}")
+
+    if not result.get("ok"):
+        err = result.get("error") or result.get("message") or "Unknown error"
+        return await loading.edit(content=f"Obfuscation failed: {err}")
+
+    obf_code = result.get("code", "")
+    if not obf_code:
+        return await loading.edit(content="API did not return any code.")
+
+    meta = result.get("meta", {}) or {}
+    out_kb = f"{len(obf_code) / 1024:.2f}"
+
+    label = "8xms Obfuscator"
+    if meta:
+        frag = meta.get("fragments") or meta.get("fragment_count")
+        if frag:
+            label += f" ({frag} fragments)"
+
+    await send_result(ctx, label, filename, obf_code, out_kb, loading_msg=loading)
 
 
 if __name__ == "__main__":
