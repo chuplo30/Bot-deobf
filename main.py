@@ -63,11 +63,14 @@ bot = commands.Bot(command_prefix=".", intents=intents)
 
 bot.remove_command("help")
 
-
 @bot.event
 async def on_ready():
     print(f"Bot online: {bot.user}")
 
+    await bot.change_presence(
+        status=discord.Status.idle,
+        activity=discord.Game(name="")
+    )
 
 def call_deobf_api(endpoint: str, content: bytes) -> dict:
     files = {"file": ("script.lua", content, "text/plain")}
